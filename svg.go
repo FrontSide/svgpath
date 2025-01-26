@@ -2,7 +2,7 @@ package svgpath
 
 import (
 	"fmt"
-	"math"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -10,12 +10,24 @@ import (
 
 type Segment interface {
 	PositionAt(float64) *Position
+	Length() float64
+	StartPosition() *Position
+	EndPosition() *Position
+}
+
+type Path struct {
+	segments []Segment
+	length   float64
+}
+
+func (p *Path) String() string {
+	return fmt.Sprintf("Path(%s)[l=%f]", p.segments, p.length)
 }
 
 var validSegmentCommands []string = []string{
 	"m", "M", "l", "L", "v", "V", "h", "H", "z", "Z", "c", "C", "q", "Q", "t", "T", "s", "S", "a", "A"}
 
-func ParseSegmentsFromSVG(svgData string) []*Segment {
+func PathFromSVG(svgData string) *Path {
 	if svgData == "" {
 		return nil
 	}
@@ -30,17 +42,20 @@ func ParseSegmentsFromSVG(svgData string) []*Segment {
 
 	// Split into segments
 	segmentsData := strings.Split(svgData, "|")
-	var segments []*Segment
+	var segments []Segment
 
-	var cpx, cpy float64
+	var end = &Position{}
 	re := regexp.MustCompile(`[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?`)
 
 	for _, segmentStr := range segmentsData {
+
+		log.Printf("enter new segment: %s", segmentStr)
+
 		if segmentStr == "" {
 			continue
 		}
 
-		cmdChar := segmentStr[:1]
+		nextCmd := segmentStr[:1]
 
 		//Parse the segments coordinates (the float numbers following a command)
 		segmentPtsStr := segmentStr[1:] // Remove the command character
@@ -58,304 +73,183 @@ func ParseSegmentsFromSVG(svgData string) []*Segment {
 
 		for len(coords) > 0 {
 
-			var points []float64
-			startX, startY := cpx, cpy
-			var cmd string
+			start := end
 
-			switch cmdChar {
-			case "l":
-				cpx += coords[0]
-				cpy += coords[1]
-				points = append(points, cpx, cpy)
+			switch nextCmd {
+			case "l": //line
+				end = &Position{end.X + coords[0], end.Y + coords[1]}
+				segments = append(segments, NewLine(start, end))
 				coords = coords[2:]
-				cmd = "L"
-			case "L":
-				cpx = coords[0]
-				cpy = coords[1]
-				points = append(points, cpx, cpy)
+			case "L": //line
+				end = &Position{coords[0], coords[1]}
+				segments = append(segments, NewLine(start, end))
 				coords = coords[2:]
-			case "m":
-				cpx += coords[0]
-				cpy += coords[1]
-				points = append(points, cpx, cpy)
-				cmd = "M"
-				cmdChar = "l" // subsequent points in this segment are treated as relative lineTo
+			case "m": //move
+				end = &Position{end.X + coords[0], end.Y + coords[1]}
+				//points = append(points, cpx, cpy)
+				//thisCmd = "M"
+				nextCmd = "l"                          // subsequent points in this segment are treated as relative lineTo
+				segments = append(segments, NewMove()) //TODO
 				coords = coords[2:]
-			case "M":
-				cpx = coords[0]
-				cpy = coords[1]
-				points = append(points, cpx, cpy)
-				cmd = "M"
-				cmdChar = "L" // subsequent points in this segment are treated as relative lineTo
+			case "M": //move
+				end = &Position{coords[0], coords[1]}
+				//points = append(points, cpx, cpy)
+				//thisCmd = "M"
+				nextCmd = "L"                          // subsequent points in this segment are treated as relative lineTo
+				segments = append(segments, NewMove()) //TODO
 				coords = coords[2:]
-			case "h":
-				cpx += coords[0]
-				points = append(points, cpx, cpy)
+			case "h": //horizontal line
+				end = &Position{end.X + coords[0], end.Y}
+				segments = append(segments, NewLine(start, end))
 				coords = coords[1:]
-				cmd = "L"
-			case "H":
-				cpx = coords[0]
-				points = append(points, cpx, cpy)
+			case "H": //horizontal line
+				end = &Position{coords[0], end.Y}
+				segments = append(segments, NewLine(start, end))
 				coords = coords[1:]
-				cmd = "L"
-			case "v":
-				cpy += coords[0]
-				points = append(points, cpx, cpy)
+			case "v": //vertical line
+				end = &Position{end.X, end.Y + coords[0]}
+				segments = append(segments, NewLine(start, end))
 				coords = coords[1:]
-				cmd = "L"
-			case "V":
-				cpy = coords[0]
-				points = append(points, cpx, cpy)
+			case "V": //vertical line
+				end = &Position{end.X, coords[0]}
+				segments = append(segments, NewLine(start, end))
 				coords = coords[1:]
-				cmd = "L"
-			case "C":
-				points = append(points, coords[0], coords[1], coords[2], coords[3])
-				cpx = coords[4]
-				cpy = coords[5]
-				points = append(points, cpx, cpy)
+			case "C": //cubic bezier
+				end = &Position{coords[4], coords[5]}
+				segments = append(segments, NewCubicBezier(
+					start,
+					&Position{coords[0], coords[1]},
+					&Position{coords[2], coords[3]},
+					end,
+				))
 				coords = coords[6:]
-			case "c":
-				points = append(points, cpx+coords[0], cpy+coords[1], cpx+coords[2], cpy+coords[3])
-				cpx += coords[4]
-				cpy += coords[5]
-				points = append(points, cpx, cpy)
+			case "c": //cubic bezier
+				end = &Position{end.X + coords[4], end.Y + coords[5]}
+				segments = append(segments, NewCubicBezier(
+					start,
+					&Position{start.X + coords[0], start.Y + coords[1]},
+					&Position{start.X + coords[2], start.Y + coords[3]},
+					end,
+				))
 				coords = coords[6:]
-				cmd = "C"
-			case "Q":
-				points = append(points, coords[0], coords[1])
-				cpx = coords[2]
-				cpy = coords[3]
-				points = append(points, cpx, cpy)
+			case "Q": //quadratic bezier
+				end = &Position{coords[2], coords[3]}
+				segments = append(segments, NewQuadraticBezier(
+					start,
+					&Position{coords[0], coords[1]},
+					end,
+				))
 				coords = coords[4:]
-			case "q":
-				points = append(points, cpx+coords[0], cpy+coords[1])
-				cpx += coords[2]
-				cpy += coords[3]
-				points = append(points, cpx, cpy)
+			case "q": //quadratic bezier
+				end = &Position{end.X + coords[2], end.Y + coords[3]}
+				segments = append(segments, NewQuadraticBezier(
+					start,
+					&Position{start.X + coords[0], start.Y + coords[1]},
+					end,
+				))
 				coords = coords[4:]
-				cmd = "Q"
-			case "T":
-				// Smooth quadratic Bézier curve
-				prevCmd := getLastCommand(segments)
-				var ctrlX, ctrlY float64
-				if prevCmd == "Q" {
-					lastSeg := segments[len(segments)-1]
-					ctrlX = 2*cpx - lastSeg.Points[0]
-					ctrlY = 2*cpy - lastSeg.Points[1]
-				} else {
-					ctrlX = cpx
-					ctrlY = cpy
+			case "T": // Smooth quadratic Bézier curve
+				lastSeg, isLastSeqQuadratic := getLastSegement(segments).(*QuadraticBezier)
+				ctrl := start
+				if isLastSeqQuadratic {
+					ctrl = &Position{
+						2*start.X - lastSeg.b.X,
+						2*start.Y - lastSeg.b.Y,
+					}
 				}
-				cpx = coords[0]
-				cpy = coords[1]
-				points = append(points, ctrlX, ctrlY, cpx, cpy)
+				end = &Position{coords[0], coords[1]}
+				segments = append(segments, NewQuadraticBezier(
+					start,
+					ctrl,
+					end,
+				))
 				coords = coords[2:]
-				cmd = "Q"
-			case "t":
-				// Smooth quadratic Bézier curve (relative)
-				prevCmd := getLastCommand(segments)
-				var ctrlX, ctrlY float64
-				if prevCmd == "Q" {
-					lastSeg := segments[len(segments)-1]
-					ctrlX = 2*cpx - lastSeg.Points[0]
-					ctrlY = 2*cpy - lastSeg.Points[1]
-				} else {
-					ctrlX = cpx
-					ctrlY = cpy
+			case "t": // Smooth quadratic Bézier curve (relative)
+				ctrl := start
+				lastSeg, isLastSeqQuadratic := getLastSegement(segments).(*QuadraticBezier)
+				if isLastSeqQuadratic {
+					ctrl = &Position{
+						2*start.X - lastSeg.b.X,
+						2*start.Y - lastSeg.b.Y,
+					}
 				}
-				cpx += coords[0]
-				cpy += coords[1]
-				points = append(points, ctrlX, ctrlY, cpx, cpy)
+				end = &Position{
+					start.X + coords[0],
+					start.Y + coords[1],
+				}
+				segments = append(segments, NewQuadraticBezier(
+					start,
+					ctrl,
+					end,
+				))
 				coords = coords[2:]
-				cmd = "Q"
-			case "A", "a":
+			case "A", "a": //elliptical arc
 				panic("elliptical arc not implemented")
-			case "z", "Z":
-				segments = append(segments, &Segment{
-					Command: "z",
-					Points:  nil,
-					Start:   nil,
-					Length:  0,
-				})
+			case "z", "Z": //close path
+				segments = append(segments, NewEmpty())
 				coords = nil
 			default:
 				coords = nil
 			}
 
-			command := cmdChar
-			if cmd != "" {
-				command = cmd
-			}
-
-			start := &Position{X: startX, Y: startY}
-			length := calcLength(start, command, points)
-
-			//For cubic bezier curves, create a lookup table
-			//converting t values to evenly distanced spacial values
-			var cubicBezierLookupTable *LookupTable
-			if command == "C" {
-				cubicBezierLookupTable = generateCubicBezierLookupTable(start, length, points)
-			}
-
-			segments = append(segments, &Segment{
-				Command:                command,
-				Points:                 points,
-				Start:                  &Position{X: startX, Y: startY},
-				Length:                 length,
-				CubicBezierLookupTable: cubicBezierLookupTable,
-			})
-
 		}
 
-		if cmdChar == "Z" || cmdChar == "z" {
-			segments = append(segments, &Segment{
-				Command: "z",
-			})
+		//Do we need this?
+		if nextCmd == "Z" || nextCmd == "z" {
+			segments = append(segments, NewEmpty())
 		}
 	}
 
-	return segments
+	p := &Path{
+		segments: segments,
+		length:   0.0,
+	}
+	p.length = p.calculateLength()
+	return p
 }
 
-func getLastCommand(segments []*Segment) string {
+func getLastSegement(segments []Segment) Segment {
 	if len(segments) == 0 {
-		return ""
+		return nil
 	}
-	return segments[len(segments)-1].Command
+	return segments[len(segments)-1]
 }
 
-func convertEndpointToCenterParameterization(x1, y1, x2, y2, fa, fs, rx, ry, psi float64) []float64 {
-	// Placeholder function for elliptical arc conversion
-	return []float64{x1, y1, x2, y2}
+func (p *Path) calculateLength() float64 {
+	length := 0.0
+	for _, s := range p.segments {
+		length += s.Length()
+	}
+	return length
 }
 
-func calcLength(start *Position, cmd string, points []float64) float64 {
-	switch cmd {
-	case "L":
-		// Line length
-		return getLineLength(start, &Position{X: points[0], Y: points[1]})
-	case "C":
-		// Cubic Bézier curve length
-		return getCubicArcLength(
-			[]float64{start.X, points[0], points[2], points[4]},
-			[]float64{start.Y, points[1], points[3], points[5]},
-			1.0,
-		)
-	case "Q":
-		// Quadratic Bézier curve length
-		return getQuadraticArcLength(
-			[]float64{start.X, points[0], points[2]},
-			[]float64{start.Y, points[1], points[3]},
-			1.0,
-		)
-	case "A":
-		// Elliptical arc length (approximated)
-		return getEllipticalArcLength(points)
+func (p *Path) GetPositionAtLength(l float64) *Position {
+
+	if len(p.segments) == 0 {
+		return nil
 	}
 
-	return 0
-}
-
-func getPointOnEllipticalArc(c, r *Position, theta, psi float64) *Position {
-	cosPsi := math.Cos(psi)
-	sinPsi := math.Sin(psi)
-	pt := &Position{
-		X: r.X * math.Cos(theta),
-		Y: r.Y * math.Sin(theta),
-	}
-	return &Position{
-		X: c.X + (pt.X*cosPsi - pt.Y*sinPsi),
-		Y: c.Y + (pt.X*sinPsi + pt.Y*cosPsi),
-	}
-}
-
-func GetPositionAtLength(l, pathLength float64, segments []*Segment) (*Position, error) {
-
-	if len(segments) == 0 {
-		return nil, fmt.Errorf("Cannot calculate position on path with no segments")
-	}
-
-	if pathLength <= l {
-		//return last sements end coordinates
-		lastSegment := segments[len(segments)-1]
-		return &Position{
-			X: lastSegment.Points[len(lastSegment.Points)-2],
-			Y: lastSegment.Points[len(lastSegment.Points)-1],
-		}, nil
+	if p.length <= l {
+		//return last sement's end coordinates
+		return p.segments[len(p.segments)-1].EndPosition()
 	}
 
 	reachedSegmentIdx := 0
-	for i, s := range segments {
-		if l >= s.Length {
-			l -= s.Length
+	for i, s := range p.segments {
+		if l >= s.Length() {
+			l -= s.Length()
 			reachedSegmentIdx = i + 1
 		} else {
 			break
 		}
 	}
 
-	s := segments[reachedSegmentIdx]
-	ps := s.Points
+	s := p.segments[reachedSegmentIdx]
 
 	if l < 0.01 {
-		return &Position{
-			X: s.Start.X,
-			Y: s.Start.Y,
-		}, nil
+		return s.StartPosition()
 	}
 
-	switch s.Command {
-	case "L":
-		p2 := &Position{
-			X: ps[0],
-			Y: ps[1],
-		}
-		return getPointOnLine(l, s.Start, p2, nil), nil
-	case "C":
-		return getPointOnCubicBezier(
-			s.CubicBezierLookupTable.GetClosestT(l),
-			s.Start,
-			&Position{
-				X: ps[0],
-				Y: ps[1],
-			},
-			&Position{
-				X: ps[2],
-				Y: ps[3],
-			},
-			&Position{
-				ps[4],
-				ps[5],
-			},
-		), nil
-	case "Q":
-		return getPointOnQuadraticBezier(
-			l,
-			s.Start,
-			&Position{
-				X: ps[0],
-				Y: ps[1],
-			},
-			&Position{
-				X: ps[2],
-				Y: ps[3],
-			}), nil
-	case "A":
-		c := &Position{
-			X: ps[0],
-			Y: ps[1],
-		}
-		r := &Position{
-			X: ps[2],
-			Y: ps[3],
-		}
-		theta := ps[4]
-		dTheta := ps[5]
-		psi := ps[6]
-		theta += (dTheta * l) / s.Length
-		return getPointOnEllipticalArc(c, r, theta, psi), nil
-	}
-
-	return nil, fmt.Errorf("no case match for command %s when calculating point on path", s.Command)
+	return s.PositionAt(l)
 
 }

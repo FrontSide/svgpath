@@ -1,8 +1,61 @@
 package svgpath
 
 import (
+	"fmt"
 	"math"
 )
+
+type Empty struct{}
+
+func NewEmpty() *Empty {
+	return &Empty{}
+}
+
+func (e *Empty) PositionAt(t float64) *Position {
+	return nil
+}
+
+func (e *Empty) Length() float64 {
+	return 0
+}
+
+func (e *Empty) StartPosition() *Position {
+	return nil
+}
+
+func (e *Empty) EndPosition() *Position {
+	return nil
+}
+
+func (e *Empty) String() string {
+	return "Empty"
+}
+
+type Move struct{}
+
+func NewMove() *Move {
+	return &Move{}
+}
+
+func (m *Move) PositionAt(t float64) *Position {
+	return nil
+}
+
+func (m *Move) Length() float64 {
+	return 0
+}
+
+func (m *Move) StartPosition() *Position {
+	return nil
+}
+
+func (m *Move) EndPosition() *Position {
+	return nil
+}
+
+func (m *Move) String() string {
+	return "Move"
+}
 
 type Line struct {
 	start *Position
@@ -23,48 +76,44 @@ func getLineLength(start, end *Position) float64 {
 
 func (l *Line) PositionAt(t float64) *Position {
 
-	if from == nil {
-		from = p1
-	}
-
-	lineLength := getLineLength(p1, p2)
+	lineLength := getLineLength(l.start, l.end)
 
 	if lineLength < math.Pow(1, -10) {
-		return p1
+		return l.start
 	}
 
-	if p1.X == p2.X {
-		if p2.Y < p1.Y {
-			dist = -dist
+	if l.start.X == l.end.X {
+		if l.end.Y < l.start.Y {
+			t = -t
 		}
 		return &Position{
-			X: from.X,
-			Y: dist,
+			X: l.start.X,
+			Y: t,
 		}
 	}
 
-	m := (p2.Y - p1.Y) / (p2.X - p1.X)
+	m := (l.end.Y - l.start.Y) / (l.end.X - l.start.X)
 	mult := 1.0
-	if p2.X < p1.X {
+	if l.end.X < l.start.X {
 		mult = -1.0
 	}
-	run := math.Sqrt((dist*dist)/(1+m*m)) * mult
+	run := math.Sqrt((t*t)/(1+m*m)) * mult
 	rise := m * run
 
-	if math.Abs(from.Y-p1.Y-m*(from.X-p1.X)) < math.Pow(1, -10) {
+	if math.Abs(l.start.Y-l.start.Y-m*(l.start.X-l.start.X)) < math.Pow(1, -10) {
 		return &Position{
-			X: from.X + run,
-			Y: from.Y + rise,
+			X: l.start.X + run,
+			Y: l.start.Y + rise,
 		}
 	}
 
-	u := ((from.X-p1.X)*(p2.X-p1.X) + (from.Y-p1.Y)*(p2.Y-p1.Y)) / (lineLength * lineLength)
+	u := ((l.start.X-l.start.X)*(l.end.X-l.start.X) + (l.start.Y-l.start.Y)*(l.end.Y-l.start.Y)) / (lineLength * lineLength)
 	i := &Position{
-		X: p1.X + u*(p2.X-p1.X),
-		Y: p1.Y + u*(p2.Y-p1.Y),
+		X: l.start.X + u*(l.end.X-l.start.X),
+		Y: l.start.Y + u*(l.end.Y-l.start.Y),
 	}
-	pRise := getLineLength(from, i)
-	pRun := math.Sqrt(dist*dist - pRise*pRise)
+	pRise := getLineLength(l.start, i)
+	pRun := math.Sqrt(t*t - pRise*pRise)
 	adjustedRun := math.Sqrt((pRun*pRun)/(1+m*m)) * mult
 	adjustedRise := m * adjustedRun
 
@@ -75,12 +124,64 @@ func (l *Line) PositionAt(t float64) *Position {
 
 }
 
+func (l *Line) Length() float64 {
+	return l.length
+}
+
+func (l *Line) StartPosition() *Position {
+	return l.start
+}
+
+func (l *Line) EndPosition() *Position {
+	return l.end
+}
+
+func (l *Line) String() string {
+	return fmt.Sprintf("Line(%s %s)[l=%f]", l.start, l.end, l.length)
+}
+
+/*EllipticalArc to be implemented*/
 type EllipticalArc struct {
+	start  *Position
+	end    *Position
+	c      *Position
+	r      *Position
+	theta  float64
+	psi    float64
 	length float64
+}
+
+func (e *EllipticalArc) PositionAt(t float64) *Position {
+	cosPsi := math.Cos(e.psi)
+	sinPsi := math.Sin(e.psi)
+	pt := &Position{
+		X: e.r.X * math.Cos(e.theta),
+		Y: e.r.Y * math.Sin(e.theta),
+	}
+	return &Position{
+		X: e.c.X + (pt.X*cosPsi - pt.Y*sinPsi),
+		Y: e.c.Y + (pt.X*sinPsi + pt.Y*cosPsi),
+	}
 }
 
 func (e *EllipticalArc) calculateLength() float64 {
 	return 0.0
+}
+
+func (e *EllipticalArc) Length() float64 {
+	return 0.0
+}
+
+func (e *EllipticalArc) StartPosition() *Position {
+	return nil
+}
+
+func (e *EllipticalArc) EndPosition() *Position {
+	return nil
+}
+
+func (e *EllipticalArc) String() string {
+	return fmt.Sprintf("EllipticalArc(%s %s)[l=%f]", "", "", e.length)
 }
 
 type QuadraticBezier struct {
@@ -149,6 +250,22 @@ func (q *QuadraticBezier) PositionAt(t float64) *Position {
 	}
 }
 
+func (q *QuadraticBezier) Length() float64 {
+	return q.length
+}
+
+func (q *QuadraticBezier) StartPosition() *Position {
+	return q.start
+}
+
+func (q *QuadraticBezier) EndPosition() *Position {
+	return q.b
+}
+
+func (q *QuadraticBezier) String() string {
+	return fmt.Sprintf("QuadraticBezier(%s %s %s)[l=%f]", q.start, q.b, q.c, q.length)
+}
+
 type LookupTable struct {
 	distValues []float64
 	tValues    []float64
@@ -167,8 +284,8 @@ type CubicBezier struct {
 
 func NewCubicBezier(start, b, c, d *Position) *CubicBezier {
 	bez := &CubicBezier{start, b, c, d, 0, nil}
-	bez.length = bez.DistanceAt(1.0)
 	bez.lookupTable = bez.generateLookupTable()
+	bez.length = bez.lookupTable.distValues[len(bez.lookupTable.distValues)-1]
 	return bez
 }
 
@@ -188,7 +305,11 @@ func (c *CubicBezier) ApproximateT(dist float64) float64 {
 	return 1.0
 }
 
-func (c *CubicBezier) PositionAt(t float64) *Position {
+func (c *CubicBezier) PositionAt(dist float64) *Position {
+	return c.PositionAtT(c.ApproximateT(dist))
+}
+
+func (c *CubicBezier) PositionAtT(t float64) *Position {
 	cb1 := t * t * t
 	cb2 := 3 * t * t * (1 - t)
 	cb3 := 3 * t * (1 - t) * (1 - t)
@@ -201,7 +322,7 @@ func (c *CubicBezier) PositionAt(t float64) *Position {
 }
 
 func (c *CubicBezier) generateLookupTable() *LookupTable {
-	tValueSampleStep := 1.0 / 500 //Using 500 samples
+	tValueSampleStep := 1.0 / 2000 //Using 500 samples
 	tValues := []float64{}
 	distValues := []float64{}
 	distAcc := 0.0
@@ -209,7 +330,7 @@ func (c *CubicBezier) generateLookupTable() *LookupTable {
 	for t := 0.0; t <= 1.0; t += tValueSampleStep {
 		tValues = append(tValues, t)
 
-		pos := c.PositionAt(t)
+		pos := c.PositionAtT(t)
 		p2pDist := previousPoint.Distance(pos)
 		distAcc += p2pDist
 		previousPoint = pos
@@ -220,4 +341,20 @@ func (c *CubicBezier) generateLookupTable() *LookupTable {
 		tValues:    tValues,
 		distValues: distValues,
 	}
+}
+
+func (c *CubicBezier) Length() float64 {
+	return c.length
+}
+
+func (c *CubicBezier) StartPosition() *Position {
+	return c.start
+}
+
+func (c *CubicBezier) EndPosition() *Position {
+	return c.d
+}
+
+func (c *CubicBezier) String() string {
+	return fmt.Sprintf("CubicBezier(%s %s %s %s)[l=%f]", c.start, c.b, c.c, c.d, c.length)
 }
