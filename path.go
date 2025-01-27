@@ -5,6 +5,61 @@ import (
 	"math"
 )
 
+type Segment interface {
+	PositionAt(float64) *Position
+	Length() float64
+	StartPosition() *Position
+	EndPosition() *Position
+}
+
+type Path struct {
+	segments []Segment
+	length   float64
+}
+
+func (p *Path) calculateLength() float64 {
+	length := 0.0
+	for _, s := range p.segments {
+		length += s.Length()
+	}
+	return length
+}
+
+func (p *Path) GetPositionAtLength(l float64) *Position {
+
+	if len(p.segments) == 0 {
+		return nil
+	}
+
+	if p.length <= l {
+		//return last sement's end coordinates
+		return p.segments[len(p.segments)-1].EndPosition()
+	}
+
+	reachedSegmentIdx := 0
+	for i, s := range p.segments {
+		if l >= s.Length() {
+			l -= s.Length()
+			reachedSegmentIdx = i + 1
+		} else {
+			break
+		}
+	}
+
+	s := p.segments[reachedSegmentIdx]
+
+	if l < 0.01 {
+		return s.StartPosition()
+	}
+
+	return s.PositionAt(l)
+
+}
+
+func (p *Path) String() string {
+	return fmt.Sprintf("Path(%s)[l=%f]", p.segments, p.length)
+}
+
 type Empty struct{}
 
 func NewEmpty() *Empty {
