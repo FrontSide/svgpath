@@ -25,6 +25,10 @@ func (p *Path) calculateLength() float64 {
 	return length
 }
 
+func (p *Path) Length() float64 {
+	return p.length
+}
+
 func (p *Path) GetPositionAtLength(l float64) *Position {
 
 	if len(p.segments) == 0 {
